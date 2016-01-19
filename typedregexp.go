@@ -6,6 +6,8 @@ whose fields must all be strings. Each field on the struct must contain a valid 
 The template string then has each reference to each field replaced with a capture group that matches
 the corresponding sub-expression in the field.
 
+POSIX regular expressions are not supported. regexp.CompilePOSIX can't handle named capture groups.
+
 The returned TypedRegexp can be used to fill a struct.
 
 	type Values struct {
@@ -77,28 +79,10 @@ func MustCompile(pattern string, captureType interface{}) *TypedRegexp {
 	return re
 }
 
-// MustCompilePOSIX is the same as CompilePOSIX, but panics on error.
-func MustCompilePOSIX(pattern string, captureType interface{}) *TypedRegexp {
-	re, err := CompilePOSIX(pattern, captureType)
-	if err != nil {
-		panic(err)
-	}
-	return re
-}
-
 // Compile creates a TypedRegexp from a regular expression pattern string that uses the text/template
 // package to refer to fields in a struct. captureGroups must be a struct with only exported string fields.
 // Each field should contain the regex to match into that field.
 func Compile(patternTemplate string, captureGroups interface{}) (*TypedRegexp, error) {
-	return compile(patternTemplate, captureGroups, regexp.Compile)
-}
-
-// CompilePOSIX is like Compile but uses regexp.CompilePOSIX to compile the underlying Regexp.
-func CompilePOSIX(patternTemplate string, captureGroups interface{}) (*TypedRegexp, error) {
-	return compile(patternTemplate, captureGroups, regexp.CompilePOSIX)
-}
-
-func compile(patternTemplate string, captureGroups interface{}, compiler func(string) (*regexp.Regexp, error)) (*TypedRegexp, error) {
 	ct := reflect.TypeOf(captureGroups)
 	if ct.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("captureGroups must be a struct, is a %s", ct)
@@ -113,7 +97,7 @@ func compile(patternTemplate string, captureGroups interface{}, compiler func(st
 	if err != nil {
 		return nil, err
 	}
-	re, err := compiler(pattern)
+	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing `%s`: %s", pattern, err)
 	}
