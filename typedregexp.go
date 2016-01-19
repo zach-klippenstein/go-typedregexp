@@ -39,6 +39,8 @@ import (
 	"text/template"
 )
 
+// TypedRegexp is the representation of a compiled regular expression that fills a struct with
+// the values of its submatches.
 type TypedRegexp struct {
 	pattern *regexp.Regexp
 
@@ -75,8 +77,28 @@ func MustCompile(pattern string, captureType interface{}) *TypedRegexp {
 	return re
 }
 
-// Compile
+// MustCompilePOSIX is the same as CompilePOSIX, but panics on error.
+func MustCompilePOSIX(pattern string, captureType interface{}) *TypedRegexp {
+	re, err := CompilePOSIX(pattern, captureType)
+	if err != nil {
+		panic(err)
+	}
+	return re
+}
+
+// Compile creates a TypedRegexp from a regular expression pattern string that uses the text/template
+// package to refer to fields in a struct. captureGroups must be a struct with only exported string fields.
+// Each field should contain the regex to match into that field.
 func Compile(patternTemplate string, captureGroups interface{}) (*TypedRegexp, error) {
+	return compile(patternTemplate, captureGroups, regexp.Compile)
+}
+
+// CompilePOSIX is like Compile but uses regexp.CompilePOSIX to compile the underlying Regexp.
+func CompilePOSIX(patternTemplate string, captureGroups interface{}) (*TypedRegexp, error) {
+	return compile(patternTemplate, captureGroups, regexp.CompilePOSIX)
+}
+
+func compile(patternTemplate string, captureGroups interface{}, compiler func(string) (*regexp.Regexp, error)) (*TypedRegexp, error) {
 	ct := reflect.TypeOf(captureGroups)
 	if ct.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("captureGroups must be a struct, is a %s", ct)
@@ -91,7 +113,7 @@ func Compile(patternTemplate string, captureGroups interface{}) (*TypedRegexp, e
 	if err != nil {
 		return nil, err
 	}
-	re, err := regexp.Compile(pattern)
+	re, err := compiler(pattern)
 	if err != nil {
 		return nil, err
 	}
@@ -173,6 +195,7 @@ func fillPatternTemplate(patternTemplate string, groupStruct interface{}) (strin
 
 /*
 Find sets the fields of values to the matches of the patterns specified for them in Compile.
+values must be a pointer to the same type of struct as used in Compile.
 Returns true if there is at least 1 field match.
 
 Fields for which no match is found will not be modified, so you can specify default values by
