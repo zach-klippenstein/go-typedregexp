@@ -115,7 +115,7 @@ func compile(patternTemplate string, captureGroups interface{}, compiler func(st
 	}
 	re, err := compiler(pattern)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error parsing `%s`: %s", pattern, err)
 	}
 
 	indices := make(map[string][]int)
@@ -209,11 +209,60 @@ func (r *TypedRegexp) Find(s string, values interface{}) (found bool) {
 		panic(fmt.Errorf("values must be %s, is %s", reflect.PtrTo(t), ptr.Type()))
 	}
 
-	v := ptr.Elem()
-
 	submatches := r.pattern.FindStringSubmatch(s)
 	if len(submatches) == 0 {
 		return false
+	}
+	r.assignSubmatchesToStruct(submatches, &ptr)
+	return true
+}
+
+// FindAll finds the first len(values) matches of the regex in s.
+// valuesSlice must be a slice of structs (or pointers to structs) of the same type as passed to Compile.
+// Nil elements are skipped.
+// Returns the number of matches found. Note that not all valuesSlice[:n] may have been
+// set from the regexp, if some of the matches didn't match on any of the fields.
+//
+// Calling FindAll with a slice of len 1 is basically same as passing a pointer to that struct
+// to Find().
+func (r *TypedRegexp) FindAll(s string, valuesSlice interface{}) (n int) {
+	t := reflect.TypeOf(r.captureGroups)
+	slice := reflect.ValueOf(valuesSlice)
+
+	sliceType := slice.Type()
+	expectedType := reflect.SliceOf(t)
+	expectedPtrType := reflect.SliceOf(reflect.PtrTo(t))
+	if sliceType != expectedType && sliceType != expectedPtrType {
+		panic(fmt.Errorf("values must be %s or %s, is %s", expectedType, expectedPtrType, sliceType))
+	}
+
+	if slice.Len() == 0 {
+		return 0
+	}
+
+	allSubmatches := r.pattern.FindAllStringSubmatch(s, slice.Len())
+	n = len(allSubmatches)
+	for submatchIndex, submatches := range allSubmatches {
+		v := slice.Index(submatchIndex)
+
+		if v.Kind() == reflect.Ptr && v.IsNil() {
+			continue
+		}
+
+		r.assignSubmatchesToStruct(submatches, &v)
+		//		slice.Index(submatchIndex).Set(v)
+	}
+	return
+}
+
+// assignSubmatchesToStruct uses the submatch mapping from r to set fields in v.
+// v must be a struct of the type passed to Compile, or a pointer to such a struct.
+// v may be mutated.
+func (r *TypedRegexp) assignSubmatchesToStruct(submatches []string, v *reflect.Value) {
+	t := reflect.TypeOf(r.captureGroups)
+
+	if v.Kind() == reflect.Ptr {
+		*v = v.Elem()
 	}
 
 	for i := 0; i < v.NumField(); i++ {
@@ -223,7 +272,6 @@ func (r *TypedRegexp) Find(s string, values interface{}) (found bool) {
 		fieldValue := r.findFirstNonEmptySubmatchForField(name, submatches)
 		v.Field(i).SetString(fieldValue)
 	}
-	return true
 }
 
 func (r *TypedRegexp) findFirstNonEmptySubmatchForField(field string, submatches []string) string {
