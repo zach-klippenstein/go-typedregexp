@@ -166,3 +166,15 @@ func TestFind_WrongType(t *testing.T) {
 		re.Find("foo", CaptureGroups{})
 	}()
 }
+
+func TestMustCompile(t *testing.T) {
+	MustCompile(`[a-z]`,struct{}{})
+	MustCompilePOSIX(`[a-z]`,struct{}{})
+
+	assert.Panics(t, func(){
+		MustCompile(`(`, struct{}{})
+	})
+	assert.Panics(t, func() {
+		MustCompilePOSIX(`(`, struct{}{})
+	})
+}
