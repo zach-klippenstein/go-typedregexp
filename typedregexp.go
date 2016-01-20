@@ -44,7 +44,11 @@ import (
 // TypedRegexp is the representation of a compiled regular expression that fills a struct with
 // the values of its submatches.
 type TypedRegexp struct {
-	pattern *regexp.Regexp
+	// The struct passed to Compile, unchanged.
+	subExpressions interface{}
+	template *template.Template
+
+	pattern  *regexp.Regexp
 
 	/*
 	 An instance of the struct that is passed into Compile whose fields are regexes.
@@ -71,8 +75,8 @@ type TypedRegexp struct {
 }
 
 // MustCompile is the same as Compile, but panics on error.
-func MustCompile(pattern string, captureType interface{}) *TypedRegexp {
-	re, err := Compile(pattern, captureType)
+func MustCompile(pattern string, subExpressions interface{}) *TypedRegexp {
+	re, err := Compile(pattern, subExpressions)
 	if err != nil {
 		panic(err)
 	}
@@ -80,20 +84,21 @@ func MustCompile(pattern string, captureType interface{}) *TypedRegexp {
 }
 
 // Compile creates a TypedRegexp from a regular expression pattern string that uses the text/template
-// package to refer to fields in a struct. captureGroups must be a struct with only exported string fields.
+// package to refer to fields in a struct.
+// subExpressions must be a struct with only exported string fields.
 // Each field should contain the regex to match into that field.
-func Compile(patternTemplate string, captureGroups interface{}) (*TypedRegexp, error) {
-	ct := reflect.TypeOf(captureGroups)
+func Compile(patternTemplate string, subExpressions interface{}) (*TypedRegexp, error) {
+	ct := reflect.TypeOf(subExpressions)
 	if ct.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("captureGroups must be a struct, is a %s", ct)
 	}
 
-	captureGroups, fieldNames, err := wrapFieldsInCaptureGroups(captureGroups)
+	captureGroups, fieldNames, err := wrapFieldsInCaptureGroups(subExpressions)
 	if err != nil {
 		return nil, err
 	}
 
-	pattern, err := fillPatternTemplate(patternTemplate, captureGroups)
+	template, pattern, err := fillPatternTemplate(patternTemplate, captureGroups)
 	if err != nil {
 		return nil, err
 	}
@@ -113,6 +118,8 @@ func Compile(patternTemplate string, captureGroups interface{}) (*TypedRegexp, e
 	}
 
 	return &TypedRegexp{
+		template:                   template,
+		subExpressions:             subExpressions,
 		captureGroups:              captureGroups,
 		submatchIndicesByFieldName: indices,
 		pattern:                    re,
@@ -120,13 +127,13 @@ func Compile(patternTemplate string, captureGroups interface{}) (*TypedRegexp, e
 }
 
 /*
-wrapFieldsInCaptureGroups returns a copy of captureGroups with each field
+wrapFieldsInCaptureGroups returns a copy of subExpressions with each field
 wrapped in a named capture group. The name of each capture group is the name of the field.
 Returns an error if any field in captureGroups is not a setable string, or the pattern in a field
 is not a valid Regexp.
 */
-func wrapFieldsInCaptureGroups(captureGroups interface{}) (interface{}, []string, error) {
-	v := reflect.ValueOf(captureGroups)
+func wrapFieldsInCaptureGroups(subExpressions interface{}) (interface{}, []string, error) {
+	v := reflect.ValueOf(subExpressions)
 	t := v.Type()
 
 	// Create a new instance of the struct to hold the wrapped values.
@@ -163,18 +170,18 @@ func wrapFieldsInCaptureGroups(captureGroups interface{}) (interface{}, []string
 	return dest.Interface(), names, nil
 }
 
-func fillPatternTemplate(patternTemplate string, groupStruct interface{}) (string, error) {
+func fillPatternTemplate(patternTemplate string, groupStruct interface{}) (*template.Template, string, error) {
 	temp, err := template.New("").Parse(patternTemplate)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 
 	var buf bytes.Buffer
 	if err := temp.Execute(&buf, groupStruct); err != nil {
-		return "", err
+		return nil, "", err
 	}
 
-	return buf.String(), nil
+	return temp, buf.String(), nil
 }
 
 /*
@@ -271,4 +278,22 @@ func (r *TypedRegexp) findFirstNonEmptySubmatchForField(field string, submatches
 		}
 	}
 	return ""
+}
+
+func (r *TypedRegexp) String() string {
+	v := reflect.ValueOf(r.subExpressions)
+	t := v.Type()
+	data := reflect.New(t).Elem()
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		fieldSrc := v.Field(i)
+		fieldDest := data.Field(i)
+
+		fieldDest.SetString(fmt.Sprintf("{{.%s=%s}}", field.Name, fieldSrc.String()))
+	}
+
+	var buf bytes.Buffer
+	r.template.Execute(&buf, data.Interface())
+	return buf.String()
 }

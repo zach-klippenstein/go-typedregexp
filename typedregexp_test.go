@@ -68,17 +68,17 @@ func TestFillPatternTemplate(t *testing.T) {
 	)
 
 	// Valid template.
-	pattern, err = fillPatternTemplate("{{.Name}}|{{.S0m3th1ng}}", groupStruct)
+	_, pattern, err = fillPatternTemplate("{{.Name}}|{{.S0m3th1ng}}", groupStruct)
 	require.NoError(t, err)
 	assert.Equal(t, `(?P<Name>\w+)|(?P<S0m3th1ng>\d+)`, pattern)
 
 	// Alternatives.
-	pattern, err = fillPatternTemplate("a {{.Name}}|b {{.Name}}", groupStruct)
+	_, pattern, err = fillPatternTemplate("a {{.Name}}|b {{.Name}}", groupStruct)
 	require.NoError(t, err)
 	assert.Equal(t, `a (?P<Name>\w+)|b (?P<Name>\w+)`, pattern)
 
 	// Invalid template.
-	pattern, err = fillPatternTemplate("{{.Name}|{{.S0m3th1ng}}", groupStruct)
+	_, pattern, err = fillPatternTemplate("{{.Name}|{{.S0m3th1ng}}", groupStruct)
 	assert.EqualError(t, err, "template: :1: unexpected \"}\" in operand")
 }
 
@@ -294,4 +294,13 @@ func TestMustCompile(t *testing.T) {
 	assert.Panics(t, func() {
 		MustCompile(`(`, struct{}{})
 	})
+}
+
+func TestString(t *testing.T) {
+	re := MustCompile(`{{.Name}}( {{.S0m3th1ng}})?`, CaptureGroups{
+		Name:      `[A-Z][a-z]+`,
+		S0m3th1ng: `.*`,
+	})
+
+	assert.Equal(t, `{{.Name=[A-Z][a-z]+}}( {{.S0m3th1ng=.*}})?`, re.String())
 }
